@@ -668,14 +668,52 @@ export class GameEngine {
                 gameOverDiv.style.textShadow = '2px 2px 4px rgba(0,0,0,0.5)';
                 gameOverDiv.style.zIndex = '1000';
                 gameOverDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-                gameOverDiv.style.padding = '30px';
+                gameOverDiv.style.padding = '30px 40px';
                 gameOverDiv.style.borderRadius = '10px';
-                gameOverDiv.innerHTML = `
-                    <div style="font-size: 48px; margin-bottom: 20px;">Game Over!</div>
-                    <div style="margin-bottom: 10px">Final Score: ${finalScore}</div>
-                    <div style="margin-bottom: 20px">Coins Collected: ${this.gameState.coins}</div>
-                    <div style="font-size: 24px; margin-top: 20px">Press ↑ to Restart</div>
+                gameOverDiv.style.boxShadow = '0 0 20px rgba(0,0,0,0.7)';
+                gameOverDiv.style.minWidth = '300px';
+                gameOverDiv.style.animation = 'fadeIn 0.5s ease-in-out';
+                
+                // Add CSS animation
+                const style = document.createElement('style');
+                style.textContent = `
+                    @keyframes fadeIn {
+                        from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+                        to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+                    }
+                    
+                    @keyframes pulse {
+                        0% { transform: scale(1); }
+                        50% { transform: scale(1.05); }
+                        100% { transform: scale(1); }
+                    }
+                    
+                    .restart-button {
+                        animation: pulse 1.5s infinite;
+                        cursor: pointer;
+                    }
                 `;
+                document.head.appendChild(style);
+                
+                // Create HTML content for game over screen
+                gameOverDiv.innerHTML = `
+                    <div style="font-size: 48px; margin-bottom: 30px; font-weight: bold; color: #ff5252;">Game Over!</div>
+                    <div style="margin-bottom: 15px; font-size: 28px;">Final Score: <span style="color: #ffff00;">${finalScore}</span></div>
+                    <div style="margin-bottom: 25px; font-size: 24px;">Coins Collected: <span style="color: #ffff00;">${this.gameState.coins}</span></div>
+                    <div style="font-size: 22px; margin-top: 25px; margin-bottom: 20px;">High Score: <span style="color: #ffff00;">${Math.floor(this._highScore || localStorage.getItem('highScore') || 0)}</span></div>
+                    <div class="restart-button" style="font-size: 24px; margin-top: 30px; padding: 10px; background-color: #4CAF50; border-radius: 5px; display: inline-block;">
+                        Press ↑ to Restart
+                    </div>
+                `;
+                
+                // Add click event to restart button
+                const restartButton = gameOverDiv.querySelector('.restart-button');
+                if (restartButton) {
+                    restartButton.addEventListener('click', () => {
+                        this.gameState.startGame();
+                    });
+                }
+                
                 document.body.appendChild(gameOverDiv);
                 break;
         }
