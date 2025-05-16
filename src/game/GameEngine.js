@@ -285,16 +285,11 @@ export class GameEngine {
     }
 
     updateScore(score) {
-        // Update the score element
-        if (this.scoreElement) {
-            this.scoreElement.textContent = `Score: ${Math.floor(score)}`;
-            this.updateHighScore(score);
-        }
+        this.scoreElement.textContent = `Score: ${Math.floor(score)}`;
+        this.updateHighScore(score);
         
         // Update coin display
-        if (this.coinCountElement) {
-            this.coinCountElement.textContent = this.gameState.coins || "0";
-        }
+        this.coinCountElement.textContent = this.gameState.coins;
     }
 
     updateHighScore(currentScore) {
@@ -328,8 +323,7 @@ export class GameEngine {
 
             // Update score continuously with multiplier
             const pointMultiplier = this.hasDoublePoints ? 2 : 1;
-            const scoreIncrease = deltaTime * 10 * this.difficultyFactor * pointMultiplier;
-            this.score += scoreIncrease;
+            this.score += deltaTime * 10 * this.difficultyFactor * pointMultiplier;
             this.updateScore(this.score);
 
             // Spawn trees and collectibles
@@ -597,39 +591,31 @@ export class GameEngine {
                     });
                     const shieldBreakParticles = new THREE.Points(shieldBreakGeometry, shieldBreakMaterial);
                     
-                    if (this.hero.mesh) {
+                    if (this.hero.mesh) { // Ensure hero mesh exists
                         this.hero.mesh.add(shieldBreakParticles);
-                        
-                        // Remove particles after 1 second
-                        setTimeout(() => {
-                            if (this.hero.mesh) {
-                                this.hero.mesh.remove(shieldBreakParticles);
-                            }
-                        }, 1000);
                     }
                     
-                    // Make shield break sound
-                    try {
-                        this.audioManager.play('shield');
-                    } catch (e) {
-                        console.warn('Could not play shield sound', e);
-                    }
-                    
-                    // Resume game
-                    this.gameState.state = GameStates.PLAYING;
-                    return;
+                    // Remove particles after 1 second
+                    setTimeout(() => {
+                        if (this.hero.mesh) {
+                            this.hero.mesh.remove(shieldBreakParticles);
+                        }
+                    }, 1000);
+
+                    this.audioManager.play('shield'); // Sound for shield used/broken
+
+                    gameState.state = GameStates.PLAYING; // Go back to playing
+                    return; // Game continues
                 }
                 
-                // Reduce lives if available
-                if (this.lives > 1) {
+                // Reduce lives if available (if current lives are 2 or more, can lose one)
+                if (this.lives > 1) { 
                     this.lives--;
                     this.updateLivesDisplay();
-                    
-                    // Play collision sound
-                    this.audioManager.playCollision();
+                    this.audioManager.playCollision(); // Sound for losing life
                     
                     // Visual effect for life lost
-                    if (this.hero.mesh) {
+                    if (this.hero.mesh) { // Ensure hero mesh exists
                         this.hero.mesh.visible = false;
                         setTimeout(() => {
                             if (this.hero.mesh) {
@@ -638,18 +624,17 @@ export class GameEngine {
                         }, 200);
                     }
                     
-                    // Resume game
-                    this.gameState.state = GameStates.PLAYING;
-                    return;
+                    gameState.state = GameStates.PLAYING; // Go back to playing
+                    return; // Game continues
                 }
                 
-                // If we get here, it's truly game over
-                this.audioManager.playGameOver();
+                // If neither shield nor extra lives were used, THEN it's truly game over.
+                this.audioManager.playGameOver(); 
                 
-                // Explode hero
-                if (this.hero) {
+                if (this.hero) { // Ensure hero exists
                     this.hero.explode();
                 }
+                // this.audioManager.playCollision(); // Potentially redundant if hero.explode() has sound or playGameOver is sufficient
                 
                 const finalScore = Math.floor(this.score);
                 this.updateHighScore(finalScore);
@@ -667,81 +652,29 @@ export class GameEngine {
                 gameOverDiv.style.textAlign = 'center';
                 gameOverDiv.style.textShadow = '2px 2px 4px rgba(0,0,0,0.5)';
                 gameOverDiv.style.zIndex = '1000';
-                gameOverDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-                gameOverDiv.style.padding = '30px 40px';
-                gameOverDiv.style.borderRadius = '10px';
-                gameOverDiv.style.boxShadow = '0 0 20px rgba(0,0,0,0.7)';
-                gameOverDiv.style.minWidth = '300px';
-                gameOverDiv.style.animation = 'fadeIn 0.5s ease-in-out';
-                
-                // Add CSS animation
-                const style = document.createElement('style');
-                style.textContent = `
-                    @keyframes fadeIn {
-                        from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
-                        to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-                    }
-                    
-                    @keyframes pulse {
-                        0% { transform: scale(1); }
-                        50% { transform: scale(1.05); }
-                        100% { transform: scale(1); }
-                    }
-                    
-                    .restart-button {
-                        animation: pulse 1.5s infinite;
-                        cursor: pointer;
-                    }
-                `;
-                document.head.appendChild(style);
-                
-                // Create HTML content for game over screen
                 gameOverDiv.innerHTML = `
-                    <div style="font-size: 48px; margin-bottom: 30px; font-weight: bold; color: #ff5252;">Game Over!</div>
-                    <div style="margin-bottom: 15px; font-size: 28px;">Final Score: <span style="color: #ffff00;">${finalScore}</span></div>
-                    <div style="margin-bottom: 25px; font-size: 24px;">Coins Collected: <span style="color: #ffff00;">${this.gameState.coins}</span></div>
-                    <div style="font-size: 22px; margin-top: 25px; margin-bottom: 20px;">High Score: <span style="color: #ffff00;">${Math.floor(this._highScore || localStorage.getItem('highScore') || 0)}</span></div>
-                    <div class="restart-button" style="font-size: 24px; margin-top: 30px; padding: 10px; background-color: #4CAF50; border-radius: 5px; display: inline-block;">
-                        Press ↑ to Restart
-                    </div>
+                    <div style="font-size: 48px; margin-bottom: 20px;">Game Over!</div>
+                    <div style="margin-bottom: 10px">Final Score: ${finalScore}</div>
+                    <div style="margin-bottom: 20px">Coins Collected: ${this.gameState.coins}</div>
+                    <div style="font-size: 24px; margin-top: 20px">Press ↑ to Restart</div>
                 `;
-                
-                // Add click event to restart button
-                const restartButton = gameOverDiv.querySelector('.restart-button');
-                if (restartButton) {
-                    restartButton.addEventListener('click', () => {
-                        this.gameState.startGame();
-                    });
-                }
-                
                 document.body.appendChild(gameOverDiv);
                 break;
         }
     }
 
     checkCollisions() {
-        if (this.gameState.state !== GameStates.PLAYING) return;
-        
         const heroPos = this.hero.getWorldPosition();
-        let collisionDetected = false;
         
-        // Check for collisions with obstacles
         for (const obstacle of this.worldManager.treesInPath) {
-            if (!obstacle.visible) continue; // Skip inactive obstacles
-            
             const obstaclePos = new THREE.Vector3();
             obstaclePos.setFromMatrixPosition(obstacle.matrixWorld);
             
-            // Don't process obstacles that are behind the player
+            // Don't process obstacles that are behind the player (optimization)
             if (obstaclePos.z > 6) continue;
             
-            // Don't process obstacles that are too far ahead
-            if (obstaclePos.z < 0) continue;
-            
             // Different collision detection based on obstacle type
-            const obstacleType = obstacle.userData.obstacleType;
-            
-            if (obstacleType === 'rock') {
+            if (obstacle.userData.obstacleType === 'rock') {
                 // For rock obstacles, only check collision if not jumping high enough
                 const horizontalDistance = new THREE.Vector2(
                     heroPos.x - obstaclePos.x,
@@ -751,25 +684,18 @@ export class GameEngine {
                 // Rock collision test - close horizontally but not jumping high enough
                 if (horizontalDistance < 0.8 && heroPos.y < this.hero.baseY + 0.4) {
                     console.log('Rock collision detected!');
-                    collisionDetected = true;
+                    this.gameState.gameOver();
                     break;
                 }
             } else {
                 // For vertical obstacles (trees), check normal collision
                 const distance = obstaclePos.distanceTo(heroPos);
-                
-                // More precise collision detection for trees
                 if (distance <= 0.6) {
                     console.log('Tree collision detected!');
-                    collisionDetected = true;
+                    this.gameState.gameOver();
                     break;
                 }
             }
-        }
-        
-        // If collision detected and in PLAYING state, trigger game over
-        if (collisionDetected && this.gameState.state === GameStates.PLAYING) {
-            this.gameState.gameOver();
         }
     }
 
@@ -875,6 +801,7 @@ export class GameEngine {
 
     jump() {
         if (this.gameState.state === GameStates.PLAYING) {
+            // Debug the jump function
             console.log('GameEngine: Jump command received');
             
             if (!this.hero.jumping) {
@@ -886,7 +813,6 @@ export class GameEngine {
             this.hero.jump();
         } else if (this.gameState.state === GameStates.GAME_OVER) {
             // If at game over screen, pressing jump restarts the game
-            console.log('GameEngine: Restart command received from jump');
             this.gameState.startGame();
         }
     }

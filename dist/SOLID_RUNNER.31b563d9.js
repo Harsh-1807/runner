@@ -51417,18 +51417,11 @@ class GameState {
         this._state = GameStates.MENU;
         this._score = 0;
         this._highScore = this.loadHighScore();
-        this._coins = 0;
         this.observers = [];
         this.cleanupUI();
     }
     get state() {
         return this._state;
-    }
-    set state(newState) {
-        if (this._state !== newState) {
-            this._state = newState;
-            this.notifyObservers();
-        }
     }
     get score() {
         return this._score;
@@ -51436,19 +51429,11 @@ class GameState {
     get highScore() {
         return this._highScore;
     }
-    get coins() {
-        return this._coins;
-    }
-    set coins(value) {
-        this._coins = value;
-        this.notifyObservers();
-    }
     addObserver(observer) {
         this.observers.push(observer);
     }
     removeObserver(observer) {
-        const index = this.observers.indexOf(observer);
-        if (index > -1) this.observers.splice(index, 1);
+        this.observers = this.observers.filter((obs)=>obs !== observer);
     }
     notifyObservers() {
         this.observers.forEach((observer)=>{
@@ -51458,7 +51443,6 @@ class GameState {
     startGame() {
         this._state = GameStates.PLAYING;
         this._score = 0;
-        this._coins = 0;
         this.notifyObservers();
     }
     pauseGame() {
@@ -51488,19 +51472,11 @@ class GameState {
         }
     }
     loadHighScore() {
-        try {
-            return parseInt(localStorage.getItem('highScore') || '0', 10);
-        } catch (e) {
-            console.warn('Could not load high score from localStorage', e);
-            return 0;
-        }
+        const saved = localStorage.getItem('highScore');
+        return saved ? parseInt(saved) : 0;
     }
     saveHighScore() {
-        try {
-            localStorage.setItem('highScore', this._highScore.toString());
-        } catch (e) {
-            console.warn('Could not save high score to localStorage', e);
-        }
+        localStorage.setItem('highScore', this._highScore.toString());
     }
     cleanupUI() {
         // Remove any existing UI elements
@@ -51625,69 +51601,34 @@ class InputManager {
         this.setupEventListeners();
     }
     setupEventListeners() {
-        document.addEventListener('keydown', this.handleKeyDown.bind(this));
-        document.addEventListener('touchstart', this.handleTouchStart.bind(this));
-        document.addEventListener('touchmove', this.handleTouchMove.bind(this));
-        document.addEventListener('touchend', this.handleTouchEnd.bind(this));
+        document.addEventListener('keydown', (event)=>this.handleKeyDown(event));
     }
     handleKeyDown(event) {
-        // Handle key presses
-        switch(event.keyCode){
-            case 37:
+        if (this.gameState.state === (0, _gameState.GameStates).PLAYING) switch(event.code){
+            case 'ArrowLeft':
+                event.preventDefault();
                 this.gameEngine.moveLeft();
                 break;
-            case 39:
+            case 'ArrowRight':
+                event.preventDefault();
                 this.gameEngine.moveRight();
                 break;
-            case 38:
-                if (this.gameState.state === (0, _gameState.GameStates).PLAYING) this.gameEngine.jump();
-                else if (this.gameState.state === (0, _gameState.GameStates).GAME_OVER) // Restart game when pressing up at game over screen
+            case 'ArrowUp':
+                event.preventDefault();
+                this.gameEngine.jump();
+                break;
+        }
+        else if (this.gameState.state === (0, _gameState.GameStates).GAME_OVER) {
+            if (event.code === 'ArrowUp') {
+                event.preventDefault();
                 this.gameState.startGame();
-                break;
-            case 32:
-                if (this.gameState.state === (0, _gameState.GameStates).PLAYING) this.gameEngine.jump();
-                else if (this.gameState.state === (0, _gameState.GameStates).GAME_OVER) // Restart game when pressing space at game over screen
+            }
+        } else if (this.gameState.state === (0, _gameState.GameStates).MENU) {
+            if (event.code === 'ArrowUp') {
+                event.preventDefault();
                 this.gameState.startGame();
-                break;
-            case 80:
-                if (this.gameState.state === (0, _gameState.GameStates).PLAYING) this.gameState.pauseGame();
-                else if (this.gameState.state === (0, _gameState.GameStates).PAUSED) this.gameState.resumeGame();
-                break;
-            case 27:
-                if (this.gameState.state === (0, _gameState.GameStates).PLAYING) this.gameState.pauseGame();
-                else if (this.gameState.state === (0, _gameState.GameStates).PAUSED) this.gameState.resumeGame();
-                break;
+            }
         }
-    }
-    // Touch handlers for mobile support
-    handleTouchStart(event) {
-        this.touchStartX = event.touches[0].clientX;
-        this.touchStartY = event.touches[0].clientY;
-        if (this.gameState.state === (0, _gameState.GameStates).GAME_OVER) // Tap anywhere to restart when game over
-        this.gameState.startGame();
-    }
-    handleTouchMove(event) {
-        if (this.gameState.state !== (0, _gameState.GameStates).PLAYING) return;
-        if (!this.touchStartX) return;
-        const touchX = event.touches[0].clientX;
-        const touchY = event.touches[0].clientY;
-        const diffX = touchX - this.touchStartX;
-        const diffY = this.touchStartY - touchY; // Inverted for y-axis
-        // Swipe left/right
-        if (Math.abs(diffX) > 30) {
-            if (diffX > 0) this.gameEngine.moveRight();
-            else this.gameEngine.moveLeft();
-            this.touchStartX = touchX;
-        }
-        // Swipe up (jump)
-        if (diffY > 50) {
-            this.gameEngine.jump();
-            this.touchStartY = touchY;
-        }
-    }
-    handleTouchEnd() {
-        this.touchStartX = null;
-        this.touchStartY = null;
     }
 }
 
@@ -51937,13 +51878,10 @@ class GameEngine {
         this.muteButton.innerHTML = isMuted ? "\uD83D\uDD07" : "\uD83D\uDD0A";
     }
     updateScore(score) {
-        // Update the score element
-        if (this.scoreElement) {
-            this.scoreElement.textContent = `Score: ${Math.floor(score)}`;
-            this.updateHighScore(score);
-        }
+        this.scoreElement.textContent = `Score: ${Math.floor(score)}`;
+        this.updateHighScore(score);
         // Update coin display
-        if (this.coinCountElement) this.coinCountElement.textContent = this.gameState.coins || "0";
+        this.coinCountElement.textContent = this.gameState.coins;
     }
     updateHighScore(currentScore) {
         const highScore = Math.max(currentScore, parseInt(localStorage.getItem('highScore') || '0'));
@@ -51966,8 +51904,7 @@ class GameEngine {
             if (this.environmentParticles) this.environmentParticles.rotation.y += deltaTime * 0.05;
             // Update score continuously with multiplier
             const pointMultiplier = this.hasDoublePoints ? 2 : 1;
-            const scoreIncrease = deltaTime * 10 * this.difficultyFactor * pointMultiplier;
-            this.score += scoreIncrease;
+            this.score += deltaTime * 10 * this.difficultyFactor * pointMultiplier;
             this.updateScore(this.score);
             // Spawn trees and collectibles
             this.updateTrees(elapsedTime);
@@ -52170,29 +52107,20 @@ class GameEngine {
                         opacity: 0.8
                     });
                     const shieldBreakParticles = new _three.Points(shieldBreakGeometry, shieldBreakMaterial);
-                    if (this.hero.mesh) {
-                        this.hero.mesh.add(shieldBreakParticles);
-                        // Remove particles after 1 second
-                        setTimeout(()=>{
-                            if (this.hero.mesh) this.hero.mesh.remove(shieldBreakParticles);
-                        }, 1000);
-                    }
-                    // Make shield break sound
-                    try {
-                        this.audioManager.play('shield');
-                    } catch (e) {
-                        console.warn('Could not play shield sound', e);
-                    }
-                    // Resume game
-                    this.gameState.state = (0, _gameState.GameStates).PLAYING;
-                    return;
+                    if (this.hero.mesh) this.hero.mesh.add(shieldBreakParticles);
+                    // Remove particles after 1 second
+                    setTimeout(()=>{
+                        if (this.hero.mesh) this.hero.mesh.remove(shieldBreakParticles);
+                    }, 1000);
+                    this.audioManager.play('shield'); // Sound for shield used/broken
+                    gameState.state = (0, _gameState.GameStates).PLAYING; // Go back to playing
+                    return; // Game continues
                 }
-                // Reduce lives if available
+                // Reduce lives if available (if current lives are 2 or more, can lose one)
                 if (this.lives > 1) {
                     this.lives--;
                     this.updateLivesDisplay();
-                    // Play collision sound
-                    this.audioManager.playCollision();
+                    this.audioManager.playCollision(); // Sound for losing life
                     // Visual effect for life lost
                     if (this.hero.mesh) {
                         this.hero.mesh.visible = false;
@@ -52200,14 +52128,13 @@ class GameEngine {
                             if (this.hero.mesh) this.hero.mesh.visible = true;
                         }, 200);
                     }
-                    // Resume game
-                    this.gameState.state = (0, _gameState.GameStates).PLAYING;
-                    return;
+                    gameState.state = (0, _gameState.GameStates).PLAYING; // Go back to playing
+                    return; // Game continues
                 }
-                // If we get here, it's truly game over
+                // If neither shield nor extra lives were used, THEN it's truly game over.
                 this.audioManager.playGameOver();
-                // Explode hero
                 if (this.hero) this.hero.explode();
+                // this.audioManager.playCollision(); // Potentially redundant if hero.explode() has sound or playGameOver is sufficient
                 const finalScore = Math.floor(this.score);
                 this.updateHighScore(finalScore);
                 // Create game over display
@@ -52223,88 +52150,43 @@ class GameEngine {
                 gameOverDiv.style.textAlign = 'center';
                 gameOverDiv.style.textShadow = '2px 2px 4px rgba(0,0,0,0.5)';
                 gameOverDiv.style.zIndex = '1000';
-                gameOverDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-                gameOverDiv.style.padding = '30px 40px';
-                gameOverDiv.style.borderRadius = '10px';
-                gameOverDiv.style.boxShadow = '0 0 20px rgba(0,0,0,0.7)';
-                gameOverDiv.style.minWidth = '300px';
-                gameOverDiv.style.animation = 'fadeIn 0.5s ease-in-out';
-                // Add CSS animation
-                const style = document.createElement('style');
-                style.textContent = `
-                    @keyframes fadeIn {
-                        from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
-                        to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-                    }
-                    
-                    @keyframes pulse {
-                        0% { transform: scale(1); }
-                        50% { transform: scale(1.05); }
-                        100% { transform: scale(1); }
-                    }
-                    
-                    .restart-button {
-                        animation: pulse 1.5s infinite;
-                        cursor: pointer;
-                    }
-                `;
-                document.head.appendChild(style);
-                // Create HTML content for game over screen
                 gameOverDiv.innerHTML = `
-                    <div style="font-size: 48px; margin-bottom: 30px; font-weight: bold; color: #ff5252;">Game Over!</div>
-                    <div style="margin-bottom: 15px; font-size: 28px;">Final Score: <span style="color: #ffff00;">${finalScore}</span></div>
-                    <div style="margin-bottom: 25px; font-size: 24px;">Coins Collected: <span style="color: #ffff00;">${this.gameState.coins}</span></div>
-                    <div style="font-size: 22px; margin-top: 25px; margin-bottom: 20px;">High Score: <span style="color: #ffff00;">${Math.floor(this._highScore || localStorage.getItem('highScore') || 0)}</span></div>
-                    <div class="restart-button" style="font-size: 24px; margin-top: 30px; padding: 10px; background-color: #4CAF50; border-radius: 5px; display: inline-block;">
-                        Press \u{2191} to Restart
-                    </div>
+                    <div style="font-size: 48px; margin-bottom: 20px;">Game Over!</div>
+                    <div style="margin-bottom: 10px">Final Score: ${finalScore}</div>
+                    <div style="margin-bottom: 20px">Coins Collected: ${this.gameState.coins}</div>
+                    <div style="font-size: 24px; margin-top: 20px">Press \u{2191} to Restart</div>
                 `;
-                // Add click event to restart button
-                const restartButton = gameOverDiv.querySelector('.restart-button');
-                if (restartButton) restartButton.addEventListener('click', ()=>{
-                    this.gameState.startGame();
-                });
                 document.body.appendChild(gameOverDiv);
                 break;
         }
     }
     checkCollisions() {
-        if (this.gameState.state !== (0, _gameState.GameStates).PLAYING) return;
         const heroPos = this.hero.getWorldPosition();
-        let collisionDetected = false;
-        // Check for collisions with obstacles
         for (const obstacle of this.worldManager.treesInPath){
-            if (!obstacle.visible) continue; // Skip inactive obstacles
             const obstaclePos = new _three.Vector3();
             obstaclePos.setFromMatrixPosition(obstacle.matrixWorld);
-            // Don't process obstacles that are behind the player
+            // Don't process obstacles that are behind the player (optimization)
             if (obstaclePos.z > 6) continue;
-            // Don't process obstacles that are too far ahead
-            if (obstaclePos.z < 0) continue;
             // Different collision detection based on obstacle type
-            const obstacleType = obstacle.userData.obstacleType;
-            if (obstacleType === 'rock') {
+            if (obstacle.userData.obstacleType === 'rock') {
                 // For rock obstacles, only check collision if not jumping high enough
                 const horizontalDistance = new _three.Vector2(heroPos.x - obstaclePos.x, heroPos.z - obstaclePos.z).length();
                 // Rock collision test - close horizontally but not jumping high enough
                 if (horizontalDistance < 0.8 && heroPos.y < this.hero.baseY + 0.4) {
                     console.log('Rock collision detected!');
-                    collisionDetected = true;
+                    this.gameState.gameOver();
                     break;
                 }
             } else {
                 // For vertical obstacles (trees), check normal collision
                 const distance = obstaclePos.distanceTo(heroPos);
-                // More precise collision detection for trees
                 if (distance <= 0.6) {
                     console.log('Tree collision detected!');
-                    collisionDetected = true;
+                    this.gameState.gameOver();
                     break;
                 }
             }
         }
-        // If collision detected and in PLAYING state, trigger game over
-        if (collisionDetected && this.gameState.state === (0, _gameState.GameStates).PLAYING) this.gameState.gameOver();
     }
     updateTrees(elapsedTime) {
         // Remove trees that are out of view
@@ -52386,15 +52268,13 @@ class GameEngine {
     }
     jump() {
         if (this.gameState.state === (0, _gameState.GameStates).PLAYING) {
+            // Debug the jump function
             console.log('GameEngine: Jump command received');
             if (!this.hero.jumping) this.audioManager.playJump(false);
             else if (!this.hero.doubleJumping) this.audioManager.playJump(true);
             this.hero.jump();
-        } else if (this.gameState.state === (0, _gameState.GameStates).GAME_OVER) {
-            // If at game over screen, pressing jump restarts the game
-            console.log('GameEngine: Restart command received from jump');
-            this.gameState.startGame();
-        }
+        } else if (this.gameState.state === (0, _gameState.GameStates).GAME_OVER) // If at game over screen, pressing jump restarts the game
+        this.gameState.startGame();
     }
 }
 
