@@ -1,0 +1,12 @@
+{
+  "name": "solid_runner",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "start": "parcel index.html --open"
+  },
+  "dependencies": {
+    "parcel": "^...",
+    "three": "^..."
+  }
+}
