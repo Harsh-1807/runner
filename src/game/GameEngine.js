@@ -324,6 +324,11 @@ export class GameEngine {
             // Update score continuously with multiplier
             const pointMultiplier = this.hasDoublePoints ? 2 : 1;
             this.score += deltaTime * 10 * this.difficultyFactor * pointMultiplier;
+            
+            // Update gameState score as well to ensure it's synchronized
+            this.gameState._score = this.score;
+            
+            // Update UI display with current score
             this.updateScore(this.score);
 
             // Spawn trees and collectibles
@@ -336,7 +341,7 @@ export class GameEngine {
             // Update power-ups
             this.updatePowerups(deltaTime);
 
-            // Update score and difficulty
+            // Update difficulty
             this.updateGameProgress(elapsedTime);
         }
 
@@ -416,7 +421,19 @@ export class GameEngine {
         
         // Spawn new collectibles
         if (elapsedTime > this.nextCollectibleSpawn) {
-            this.collectibleManager.spawnCollectible(this.worldManager.rollingGroundSphere);
+            // Select a pattern type more frequently
+            const patternRoll = Math.random();
+            
+            // Use different patterns with higher frequency
+            if (patternRoll < 0.25) {
+                this.collectibleManager.spawnHorizontalLine(this.worldManager.rollingGroundSphere);
+            } else if (patternRoll < 0.5) {
+                this.collectibleManager.spawnDiagonalLine(this.worldManager.rollingGroundSphere);
+            } else if (patternRoll < 0.75) {
+                this.collectibleManager.spawnZigzag(this.worldManager.rollingGroundSphere);
+            } else {
+                this.collectibleManager.spawnSingleCollectible(this.worldManager.rollingGroundSphere);
+            }
             
             // Set next spawn time
             const spawnInterval = this.collectibleReleaseInterval / this.difficultyFactor;
@@ -526,8 +543,8 @@ export class GameEngine {
         // Reset collectibles
         this.collectibleManager.reset();
         
-        // Reset gamestate coins
-        this.gameState.coins = 0;
+        // Update coins display without triggering state changes
+        this._updateCoinsDisplay(0);
         
         // Start background music
         this.audioManager.startBackgroundMusic();
@@ -541,6 +558,11 @@ export class GameEngine {
         this.clock.start();
     }
 
+    // Add a new method to update coins display directly without triggering state changes
+    _updateCoinsDisplay(value) {
+        this.coinCountElement.textContent = value.toString();
+    }
+
     onGameStateChanged(gameState) {
         // Remove any existing game over display
         const existingGameOver = document.querySelector('.game-over');
@@ -548,119 +570,147 @@ export class GameEngine {
             existingGameOver.remove();
         }
 
+        // If this is a recursive call, don't process it
+        if (this._processingStateChange) return;
+        this._processingStateChange = true;
+
         switch (gameState.state) {
             case GameStates.PLAYING:
-                this.resetGame();
-                this.audioManager.startBackgroundMusic();
+                // Only reset the game if we're coming from MENU or GAME_OVER, not during other notifications
+                if (gameState._previousState === GameStates.MENU || gameState._previousState === GameStates.GAME_OVER) {
+                    this.resetGame();
+                    this.audioManager.startBackgroundMusic();
+                }
                 break;
+                
             case GameStates.GAME_OVER:
                 // Check for shield or lives FIRST, before declaring "final" game over actions.
-
                 if (this.hasShield) {
-                    this.hasShield = false;
-                    this.shieldIndicator.element.style.display = 'none';
-                    if (this.hero.shieldEffect) {
-                        this.hero.shieldEffect.visible = false;
-                    }
-                    
-                    // Visual effect for shield breaking
-                    const shieldBreakGeometry = new THREE.BufferGeometry();
-                    const positions = new Float32Array(50 * 3);
-                    const colors = new Float32Array(50 * 3);
-                    
-                    for (let i = 0; i < 50; i++) {
-                        const angle = Math.random() * Math.PI * 2;
-                        const radius = Math.random() * 0.5;
-                        positions[i * 3] = Math.cos(angle) * radius;
-                        positions[i * 3 + 1] = Math.sin(angle) * radius;
-                        positions[i * 3 + 2] = (Math.random() - 0.5) * 0.5;
-                        
-                        colors[i * 3] = 0;
-                        colors[i * 3 + 1] = 0.5;
-                        colors[i * 3 + 2] = 1;
-                    }
-                    
-                    shieldBreakGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-                    shieldBreakGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-                    
-                    const shieldBreakMaterial = new THREE.PointsMaterial({ 
-                        size: 0.05, 
-                        vertexColors: true,
-                        transparent: true,
-                        opacity: 0.8 
-                    });
-                    const shieldBreakParticles = new THREE.Points(shieldBreakGeometry, shieldBreakMaterial);
-                    
-                    if (this.hero.mesh) { // Ensure hero mesh exists
-                        this.hero.mesh.add(shieldBreakParticles);
-                    }
-                    
-                    // Remove particles after 1 second
-                    setTimeout(() => {
-                        if (this.hero.mesh) {
-                            this.hero.mesh.remove(shieldBreakParticles);
-                        }
-                    }, 1000);
-
-                    this.audioManager.play('shield'); // Sound for shield used/broken
-
-                    gameState.state = GameStates.PLAYING; // Go back to playing
-                    return; // Game continues
+                    // Use shield
+                    this.useShield();
+                    // Continue playing
+                    gameState.state = GameStates.PLAYING;
+                } 
+                else if (this.lives > 1) {
+                    // Lose a life
+                    this.loseLife();
+                    // Continue playing
+                    gameState.state = GameStates.PLAYING;
                 }
-                
-                // Reduce lives if available (if current lives are 2 or more, can lose one)
-                if (this.lives > 1) { 
-                    this.lives--;
-                    this.updateLivesDisplay();
-                    this.audioManager.playCollision(); // Sound for losing life
-                    
-                    // Visual effect for life lost
-                    if (this.hero.mesh) { // Ensure hero mesh exists
-                        this.hero.mesh.visible = false;
-                        setTimeout(() => {
-                            if (this.hero.mesh) {
-                                this.hero.mesh.visible = true;
-                            }
-                        }, 200);
-                    }
-                    
-                    gameState.state = GameStates.PLAYING; // Go back to playing
-                    return; // Game continues
+                else {
+                    // Final game over
+                    this.showGameOver();
                 }
+                break;
                 
-                // If neither shield nor extra lives were used, THEN it's truly game over.
-                this.audioManager.playGameOver(); 
-                
-                if (this.hero) { // Ensure hero exists
-                    this.hero.explode();
-                }
-                // this.audioManager.playCollision(); // Potentially redundant if hero.explode() has sound or playGameOver is sufficient
-                
-                const finalScore = Math.floor(this.score);
-                this.updateHighScore(finalScore);
-                
-                // Create game over display
-                const gameOverDiv = document.createElement('div');
-                gameOverDiv.className = 'game-over';
-                gameOverDiv.style.position = 'absolute';
-                gameOverDiv.style.top = '50%';
-                gameOverDiv.style.left = '50%';
-                gameOverDiv.style.transform = 'translate(-50%, -50%)';
-                gameOverDiv.style.color = '#ffffff';
-                gameOverDiv.style.fontSize = '36px';
-                gameOverDiv.style.fontFamily = 'Arial, sans-serif';
-                gameOverDiv.style.textAlign = 'center';
-                gameOverDiv.style.textShadow = '2px 2px 4px rgba(0,0,0,0.5)';
-                gameOverDiv.style.zIndex = '1000';
-                gameOverDiv.innerHTML = `
-                    <div style="font-size: 48px; margin-bottom: 20px;">Game Over!</div>
-                    <div style="margin-bottom: 10px">Final Score: ${finalScore}</div>
-                    <div style="margin-bottom: 20px">Coins Collected: ${this.gameState.coins}</div>
-                    <div style="font-size: 24px; margin-top: 20px">Press ↑ to Restart</div>
-                `;
-                document.body.appendChild(gameOverDiv);
+            default:
+                // No special handling for other states
                 break;
         }
+        
+        this._processingStateChange = false;
+    }
+    
+    useShield() {
+        // Use shield logic
+        this.hasShield = false;
+        this.shieldIndicator.element.style.display = 'none';
+        
+        if (this.hero.shieldEffect) {
+            this.hero.shieldEffect.visible = false;
+        }
+        
+        // Visual effect for shield breaking
+        const shieldBreakGeometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(50 * 3);
+        const colors = new Float32Array(50 * 3);
+        
+        for (let i = 0; i < 50; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.random() * 0.5;
+            positions[i * 3] = Math.cos(angle) * radius;
+            positions[i * 3 + 1] = Math.sin(angle) * radius;
+            positions[i * 3 + 2] = (Math.random() - 0.5) * 0.5;
+            
+            colors[i * 3] = 0;
+            colors[i * 3 + 1] = 0.5;
+            colors[i * 3 + 2] = 1;
+        }
+        
+        shieldBreakGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        shieldBreakGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        
+        const shieldBreakMaterial = new THREE.PointsMaterial({ 
+            size: 0.05, 
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.8 
+        });
+        const shieldBreakParticles = new THREE.Points(shieldBreakGeometry, shieldBreakMaterial);
+        
+        if (this.hero.mesh) {
+            this.hero.mesh.add(shieldBreakParticles);
+            
+            // Remove particles after 1 second
+            setTimeout(() => {
+                if (this.hero.mesh) {
+                    this.hero.mesh.remove(shieldBreakParticles);
+                }
+            }, 1000);
+        }
+
+        this.audioManager.play('shield');
+    }
+    
+    loseLife() {
+        // Lose life logic
+        this.lives--;
+        this.updateLivesDisplay();
+        this.audioManager.playCollision();
+        
+        // Visual effect for life lost
+        if (this.hero.mesh) {
+            this.hero.mesh.visible = false;
+            setTimeout(() => {
+                if (this.hero.mesh) {
+                    this.hero.mesh.visible = true;
+                }
+            }, 200);
+        }
+    }
+    
+    showGameOver() {
+        // Final game over
+        this.audioManager.playGameOver();
+        
+        if (this.hero) {
+            this.hero.explode();
+        }
+        
+        const finalScore = Math.floor(this.score);
+        this.updateHighScore(finalScore);
+        
+        // Create game over display
+        const gameOverDiv = document.createElement('div');
+        gameOverDiv.className = 'game-over';
+        gameOverDiv.style.position = 'absolute';
+        gameOverDiv.style.top = '50%';
+        gameOverDiv.style.left = '50%';
+        gameOverDiv.style.transform = 'translate(-50%, -50%)';
+        gameOverDiv.style.color = '#ffffff';
+        gameOverDiv.style.fontSize = '36px';
+        gameOverDiv.style.fontFamily = 'Arial, sans-serif';
+        gameOverDiv.style.textAlign = 'center';
+        gameOverDiv.style.textShadow = '2px 2px 4px rgba(0,0,0,0.5)';
+        gameOverDiv.style.zIndex = '1000';
+        gameOverDiv.innerHTML = `
+            <div style="font-size: 48px; margin-bottom: 20px;">Game Over!</div>
+            <div style="margin-bottom: 10px">Final Score: ${finalScore}</div>
+            <div style="margin-bottom: 20px">Coins Collected: ${this.gameState.coins}</div>
+            <div style="font-size: 24px; margin-top: 20px">Press ↑ to Restart</div>
+        `;
+        document.body.appendChild(gameOverDiv);
+        this.gameOverDisplay = gameOverDiv;
     }
 
     checkCollisions() {
@@ -682,7 +732,12 @@ export class GameEngine {
                 ).length();
                 
                 // Rock collision test - close horizontally but not jumping high enough
-                if (horizontalDistance < 0.8 && heroPos.y < this.hero.baseY + 0.4) {
+                // Increase threshold to match the rock's actual width (half of 2.4 = 1.2)
+                // Also check if hero is within the rock's width (after accounting for lane position)
+                const rockWidth = 1.2; // Half of the actual rock width
+                const inRockWidth = Math.abs(heroPos.x - obstaclePos.x) < rockWidth;
+                
+                if (horizontalDistance < 1.0 && inRockWidth && heroPos.y < this.hero.baseY + 0.4) {
                     console.log('Rock collision detected!');
                     this.gameState.gameOver();
                     break;

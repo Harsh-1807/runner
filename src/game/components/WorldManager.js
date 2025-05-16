@@ -151,9 +151,9 @@ export class WorldManager {
         const rockGroup = new THREE.Object3D();
         
         // Create main rock barrier - wider and more visible
-        const mainRockGeometry = new THREE.BoxGeometry(2.4, 0.4, 0.6);
+        const mainRockGeometry = new THREE.BoxGeometry(2.4, 0.5, 0.8);
         const rockMaterial = new THREE.MeshStandardMaterial({ 
-            color: 0xA52A2A, // Brown color for better contrast
+            color: 0xD2691E, // Chocolate brown - more vibrant and visible
             flatShading: true,
             roughness: 0.7,
             metalness: 0.3
@@ -162,8 +162,23 @@ export class WorldManager {
         const mainRock = new THREE.Mesh(mainRockGeometry, rockMaterial);
         mainRock.castShadow = true;
         mainRock.receiveShadow = true;
-        mainRock.position.y = 0.2; // Slightly raised
+        mainRock.position.y = 0.25; // Slightly raised
         rockGroup.add(mainRock);
+        
+        // Add border/highlights to make rock more visible
+        const borderGeometry = new THREE.BoxGeometry(2.5, 0.1, 0.9);
+        const borderMaterial = new THREE.MeshStandardMaterial({
+            color: 0xcd5c5c, // Indian red for contrast
+            flatShading: true,
+            roughness: 0.5,
+            metalness: 0.5,
+            emissive: 0x330000,
+            emissiveIntensity: 0.3
+        });
+        
+        const topBorder = new THREE.Mesh(borderGeometry, borderMaterial);
+        topBorder.position.y = 0.55; // Position on top of main rock
+        rockGroup.add(topBorder);
         
         // Add some smaller rocks on top for visual interest
         for (let i = 0; i < 3; i++) {
@@ -182,7 +197,7 @@ export class WorldManager {
             
             // Position small rocks on top of main rock at random positions
             smallRock.position.x = (Math.random() - 0.5) * 1.8;
-            smallRock.position.y = 0.4 + (Math.random() * 0.1);
+            smallRock.position.y = 0.5 + (Math.random() * 0.1);
             smallRock.position.z = (Math.random() - 0.5) * 0.4;
             smallRock.rotation.set(
                 Math.random() * Math.PI, 

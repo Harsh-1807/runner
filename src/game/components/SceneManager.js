@@ -48,15 +48,12 @@ export class SceneManager {
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.setSize(width, height);
         
-        // Enable physically correct lighting
-        this.renderer.physicallyCorrectLights = true;
-        
         // Enable tone mapping for better contrast
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.2;
         
-        // Use sRGB encoding for proper color display
-        this.renderer.outputEncoding = THREE.sRGBEncoding;
+        // Use sRGB color space for proper color display
+        this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         
         return this.renderer;
     }

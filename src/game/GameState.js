@@ -8,14 +8,24 @@ export const GameStates = {
 export class GameState {
     constructor() {
         this._state = GameStates.MENU;
+        this._previousState = null;
         this._score = 0;
         this._highScore = this.loadHighScore();
+        this._coins = 0;
         this.observers = [];
         this.cleanupUI();
     }
 
     get state() {
         return this._state;
+    }
+
+    set state(newState) {
+        if (this._state !== newState) {
+            this._previousState = this._state;
+            this._state = newState;
+            this.notifyObservers();
+        }
     }
 
     get score() {
@@ -26,12 +36,24 @@ export class GameState {
         return this._highScore;
     }
 
+    get coins() {
+        return this._coins;
+    }
+
+    set coins(value) {
+        this._coins = value;
+        this.notifyObservers();
+    }
+
     addObserver(observer) {
         this.observers.push(observer);
     }
 
     removeObserver(observer) {
-        this.observers = this.observers.filter(obs => obs !== observer);
+        const index = this.observers.indexOf(observer);
+        if (index > -1) {
+            this.observers.splice(index, 1);
+        }
     }
 
     notifyObservers() {
@@ -43,8 +65,13 @@ export class GameState {
     }
 
     startGame() {
+        // Set values first
+        this._previousState = this._state;
         this._state = GameStates.PLAYING;
         this._score = 0;
+        this._coins = 0;
+        
+        // Then notify observers once
         this.notifyObservers();
     }
 
@@ -79,12 +106,20 @@ export class GameState {
     }
 
     loadHighScore() {
-        const saved = localStorage.getItem('highScore');
-        return saved ? parseInt(saved) : 0;
+        try {
+            return parseInt(localStorage.getItem('highScore') || '0', 10);
+        } catch (e) {
+            console.warn('Could not load high score from localStorage', e);
+            return 0;
+        }
     }
 
     saveHighScore() {
-        localStorage.setItem('highScore', this._highScore.toString());
+        try {
+            localStorage.setItem('highScore', this._highScore.toString());
+        } catch (e) {
+            console.warn('Could not save high score to localStorage', e);
+        }
     }
 
     cleanupUI() {
