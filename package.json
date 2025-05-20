@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "A 3D runner game built with Three.js and Parcel",
   "scripts": {
-    "start": "parcel index.js",
+    "start": "parcel index.html",
     "build": "parcel build index.html --public-url ./"
   },
   "dependencies": {

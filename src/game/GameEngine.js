@@ -5,6 +5,10 @@ import { WorldManager } from './components/WorldManager';
 import { Hero } from './components/Hero';
 import { CollectibleManager } from './components/CollectibleManager';
 import { AudioManager } from './audio/AudioManager';
+import { PowerUpManager } from './managers/PowerUpManager';
+import { ScoreManager } from './managers/ScoreManager';
+import { CollisionManager } from './managers/CollisionManager';
+import { GameProgressManager } from './managers/GameProgressManager';
 
 export class GameEngine {
     constructor(gameState) {
@@ -103,6 +107,18 @@ export class GameEngine {
         
         // Initialize collectibles
         this.collectibleManager = new CollectibleManager(this.sceneManager.scene, this.worldRadius);
+
+        // Initialize managers
+        this.audioManager = new AudioManager();
+        this.powerUpManager = new PowerUpManager(this.gameState);
+        this.scoreManager = new ScoreManager(this.gameState);
+        this.gameProgressManager = new GameProgressManager(this.gameState);
+        this.collisionManager = new CollisionManager(
+            this.gameState,
+            this.hero,
+            this.worldManager,
+            this.collectibleManager
+        );
 
         // Add background trees
         this.addBackgroundTrees();
@@ -302,573 +318,185 @@ export class GameEngine {
     }
 
     update() {
-        // Get delta time
-        const deltaTime = this.clock.getDelta();
-        const elapsedTime = this.clock.getElapsedTime();
+        try {
+            const deltaTime = this.clock.getDelta();
+            const elapsedTime = this.clock.getElapsedTime();
 
-        if (this.gameState.state === GameStates.PLAYING) {
+            // Update game progress
+            this.gameProgressManager.update(deltaTime);
+
             // Update hero
-            this.hero.moveTo(this.currentLane, deltaTime);
             this.hero.update(deltaTime);
 
-            // Update world with increasing speed based on difficulty
-            const currentSpeed = this.rollingSpeed * this.difficultyFactor;
-            this.worldManager.update(currentSpeed);
-            this.hero.rollingSpeed = currentSpeed * this.worldRadius / this.heroRadius / 5;
+            // Update world and obstacles
+            this.worldManager.update(deltaTime, this.gameProgressManager.getObstacleSpeed());
 
-            // Update atmospheric particles
-            if (this.environmentParticles) {
-                this.environmentParticles.rotation.y += deltaTime * 0.05;
-            }
-
-            // Update score continuously with multiplier
-            const pointMultiplier = this.hasDoublePoints ? 2 : 1;
-            this.score += deltaTime * 10 * this.difficultyFactor * pointMultiplier;
-            
-            // Update gameState score as well to ensure it's synchronized
-            this.gameState._score = this.score;
-            
-            // Update UI display with current score
-            this.updateScore(this.score);
-
-            // Spawn trees and collectibles
-            this.updateTrees(elapsedTime);
+            // Update collectibles
             this.updateCollectibles(elapsedTime);
-            
-            // Check collisions
-            this.checkCollisions();
-            
+
             // Update power-ups
-            this.updatePowerups(deltaTime);
+            this.powerUpManager.update(deltaTime);
 
-            // Update difficulty
-            this.updateGameProgress(elapsedTime);
-        }
+            // Check collisions
+            this.collisionManager.update();
 
-        // Always render scene
-        this.sceneManager.render();
-    }
-    
-    updatePowerups(deltaTime) {
-        // Update shield
-        if (this.hasShield) {
-            this.shieldTimeRemaining -= deltaTime;
-            this.shieldIndicator.timerElement.textContent = this.shieldTimeRemaining.toFixed(1) + 's';
-            
-            if (this.shieldTimeRemaining <= 0) {
-                this.hasShield = false;
-                this.shieldIndicator.element.style.display = 'none';
-                
-                // Visual effect for shield expiring
-                if (this.hero.shieldEffect) {
-                    this.hero.shieldEffect.visible = false;
-                }
-            }
-        }
-        
-        // Update magnet
-        if (this.hasMagnet) {
-            this.magnetTimeRemaining -= deltaTime;
-            this.magnetIndicator.timerElement.textContent = this.magnetTimeRemaining.toFixed(1) + 's';
-            
-            if (this.magnetTimeRemaining <= 0) {
-                this.hasMagnet = false;
-                this.magnetIndicator.element.style.display = 'none';
-            } else {
-                // Apply magnet effect - attract nearby coins
-                this.attractCoins();
-            }
-        }
-        
-        // Update double points
-        if (this.hasDoublePoints) {
-            this.doublePointsTimeRemaining -= deltaTime;
-            this.doublePointsIndicator.timerElement.textContent = this.doublePointsTimeRemaining.toFixed(1) + 's';
-            
-            if (this.doublePointsTimeRemaining <= 0) {
-                this.hasDoublePoints = false;
-                this.doublePointsIndicator.element.style.display = 'none';
-            }
+            // Update trees
+            this.updateTrees(elapsedTime);
+
+            // Render scene
+            this.renderer.render(this.sceneManager.scene, this.camera);
+
+            // Request next frame
+            requestAnimationFrame(() => this.update());
+        } catch (error) {
+            console.error('Error in game loop:', error);
         }
     }
     
-    attractCoins() {
-        const heroPos = this.hero.getWorldPosition();
-        const magnetRadius = 3.0; // Range of the magnet
-        
-        for (const collectible of this.collectibleManager.activeCollectibles) {
-            if (collectible.type === 'coin' && collectible.active && collectible.mesh) {
-                const collectiblePos = new THREE.Vector3();
-                collectiblePos.setFromMatrixPosition(collectible.mesh.matrixWorld);
-                
-                const distance = collectiblePos.distanceTo(heroPos);
-                
-                if (distance < magnetRadius) {
-                    // Calculate direction to hero
-                    const direction = new THREE.Vector3().subVectors(heroPos, collectiblePos).normalize();
-                    
-                    // Move coin towards hero
-                    collectiblePos.add(direction.multiplyScalar(0.2));
-                    collectible.mesh.position.copy(collectiblePos);
-                }
-            }
-        }
-    }
-
     updateCollectibles(elapsedTime) {
-        // Update existing collectibles
-        this.collectibleManager.update();
-        
         // Spawn new collectibles
-        if (elapsedTime > this.nextCollectibleSpawn) {
-            // Select a pattern type more frequently
-            const patternRoll = Math.random();
-            
-            // Use different patterns with higher frequency
-            if (patternRoll < 0.25) {
-                this.collectibleManager.spawnHorizontalLine(this.worldManager.rollingGroundSphere);
-            } else if (patternRoll < 0.5) {
-                this.collectibleManager.spawnDiagonalLine(this.worldManager.rollingGroundSphere);
-            } else if (patternRoll < 0.75) {
-                this.collectibleManager.spawnZigzag(this.worldManager.rollingGroundSphere);
-            } else {
-                this.collectibleManager.spawnSingleCollectible(this.worldManager.rollingGroundSphere);
-            }
-            
-            // Set next spawn time
-            const spawnInterval = this.collectibleReleaseInterval / this.difficultyFactor;
-            this.nextCollectibleSpawn = elapsedTime + spawnInterval;
-        }
-        
-        // Check for collectible collisions
-        const heroPos = this.hero.getWorldPosition();
-        const collectedItems = this.collectibleManager.checkCollisions(heroPos);
-        
-        // Process collected items
-        for (const itemType of collectedItems) {
-            this.processCollectible(itemType);
-        }
-    }
-    
-    processCollectible(type) {
-        // Play sound
-        this.audioManager.playCollectible(type);
-        
-        switch(type) {
-            case 'coin':
-                // Add points
-                const pointsToAdd = this.coinValue * (this.hasDoublePoints ? 2 : 1);
-                this.score += pointsToAdd;
-                this.gameState.coins++;
-                break;
-                
-            case 'shield':
-                // Activate shield
-                this.hasShield = true;
-                this.shieldTimeRemaining = this.shieldDuration;
-                this.shieldIndicator.element.style.display = 'block';
-                
-                // Add visual shield effect
-                if (!this.hero.shieldEffect) {
-                    const shieldGeometry = new THREE.SphereGeometry(0.3, 16, 16);
-                    const shieldMaterial = new THREE.MeshBasicMaterial({
-                        color: 0x0088FF,
-                        transparent: true,
-                        opacity: 0.4,
-                        side: THREE.DoubleSide
-                    });
-                    this.hero.shieldEffect = new THREE.Mesh(shieldGeometry, shieldMaterial);
-                    this.hero.mesh.add(this.hero.shieldEffect);
-                } else {
-                    this.hero.shieldEffect.visible = true;
-                }
-                break;
-                
-            case 'magnet':
-                // Activate magnet
-                this.hasMagnet = true;
-                this.magnetTimeRemaining = this.magnetDuration;
-                this.magnetIndicator.element.style.display = 'block';
-                break;
-                
-            case 'doublePoints':
-                // Activate double points
-                this.hasDoublePoints = true;
-                this.doublePointsTimeRemaining = this.doublePointsDuration;
-                this.doublePointsIndicator.element.style.display = 'block';
-                break;
-                
-            case 'extraLife':
-                // Add extra life (up to maximum)
-                if (this.lives < this.maxLives) {
-                    this.lives++;
-                    this.updateLivesDisplay();
-                }
-                break;
-        }
-    }
-
-    resetGame() {
-        // Remove any existing game over display
-        if (this.gameOverDisplay && this.gameOverDisplay.parentNode) {
-            this.gameOverDisplay.parentNode.removeChild(this.gameOverDisplay);
+        if (elapsedTime >= this.nextCollectibleSpawn) {
+            this.collectibleManager.spawnCollectible();
+            this.nextCollectibleSpawn = elapsedTime + this.gameProgressManager.getCollectibleSpawnInterval();
         }
 
-        this.currentLane = this.middleLane;
-        this.hero.setLane(this.currentLane);
-        this.hero.reset();
-        this.lastTreeSpawn = 0;
-        this.difficultyFactor = 1.0;
-        this.nextTreeSpawn = this.treeReleaseInterval;
-        this.nextCollectibleSpawn = this.collectibleReleaseInterval;
-        this.score = 0;
-        this.scoreMultiplier = 1;
-        this.updateScore(0);
-        this.lives = 3;
-        this.updateLivesDisplay();
-        
-        // Reset power-ups
-        this.hasShield = false;
-        this.hasMagnet = false;
-        this.hasDoublePoints = false;
-        this.shieldIndicator.element.style.display = 'none';
-        this.magnetIndicator.element.style.display = 'none';
-        this.doublePointsIndicator.element.style.display = 'none';
-        
-        // Reset shield effect
-        if (this.hero.shieldEffect) {
-            this.hero.shieldEffect.visible = false;
-        }
-        
-        // Reset collectibles
-        this.collectibleManager.reset();
-        
-        // Update coins display without triggering state changes
-        this._updateCoinsDisplay(0);
-        
-        // Start background music
-        this.audioManager.startBackgroundMusic();
-
-        // Clear existing trees
-        while (this.worldManager.treesInPath.length > 0) {
-            const tree = this.worldManager.treesInPath[0];
-            this.worldManager.removeTree(tree);
-        }
-        
-        this.clock.start();
-    }
-
-    // Add a new method to update coins display directly without triggering state changes
-    _updateCoinsDisplay(value) {
-        this.coinCountElement.textContent = value.toString();
-    }
-
-    onGameStateChanged(gameState) {
-        // Remove any existing game over display
-        const existingGameOver = document.querySelector('.game-over');
-        if (existingGameOver) {
-            existingGameOver.remove();
-        }
-
-        // If this is a recursive call, don't process it
-        if (this._processingStateChange) return;
-        this._processingStateChange = true;
-
-        switch (gameState.state) {
-            case GameStates.PLAYING:
-                // Only reset the game if we're coming from MENU or GAME_OVER, not during other notifications
-                if (gameState._previousState === GameStates.MENU || gameState._previousState === GameStates.GAME_OVER) {
-                    this.resetGame();
-                    this.audioManager.startBackgroundMusic();
-                }
-                break;
-                
-            case GameStates.GAME_OVER:
-                // Check for shield or lives FIRST, before declaring "final" game over actions.
-                if (this.hasShield) {
-                    // Use shield
-                    this.useShield();
-                    // Continue playing
-                    gameState.state = GameStates.PLAYING;
-                } 
-                else if (this.lives > 1) {
-                    // Lose a life
-                    this.loseLife();
-                    // Continue playing
-                    gameState.state = GameStates.PLAYING;
-                }
-                else {
-                    // Final game over
-                    this.showGameOver();
-                }
-                break;
-                
-            default:
-                // No special handling for other states
-                break;
-        }
-        
-        this._processingStateChange = false;
-    }
-    
-    useShield() {
-        // Use shield logic
-        this.hasShield = false;
-        this.shieldIndicator.element.style.display = 'none';
-        
-        if (this.hero.shieldEffect) {
-            this.hero.shieldEffect.visible = false;
-        }
-        
-        // Visual effect for shield breaking
-        const shieldBreakGeometry = new THREE.BufferGeometry();
-        const positions = new Float32Array(50 * 3);
-        const colors = new Float32Array(50 * 3);
-        
-        for (let i = 0; i < 50; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const radius = Math.random() * 0.5;
-            positions[i * 3] = Math.cos(angle) * radius;
-            positions[i * 3 + 1] = Math.sin(angle) * radius;
-            positions[i * 3 + 2] = (Math.random() - 0.5) * 0.5;
-            
-            colors[i * 3] = 0;
-            colors[i * 3 + 1] = 0.5;
-            colors[i * 3 + 2] = 1;
-        }
-        
-        shieldBreakGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        shieldBreakGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-        
-        const shieldBreakMaterial = new THREE.PointsMaterial({ 
-            size: 0.05, 
-            vertexColors: true,
-            transparent: true,
-            opacity: 0.8 
-        });
-        const shieldBreakParticles = new THREE.Points(shieldBreakGeometry, shieldBreakMaterial);
-        
-        if (this.hero.mesh) {
-            this.hero.mesh.add(shieldBreakParticles);
-            
-            // Remove particles after 1 second
-            setTimeout(() => {
-                if (this.hero.mesh) {
-                    this.hero.mesh.remove(shieldBreakParticles);
-                }
-            }, 1000);
-        }
-
-        this.audioManager.play('shield');
-    }
-    
-    loseLife() {
-        // Lose life logic
-        this.lives--;
-        this.updateLivesDisplay();
-        this.audioManager.playCollision();
-        
-        // Visual effect for life lost
-        if (this.hero.mesh) {
-            this.hero.mesh.visible = false;
-            setTimeout(() => {
-                if (this.hero.mesh) {
-                    this.hero.mesh.visible = true;
-                }
-            }, 200);
-        }
-    }
-    
-    showGameOver() {
-        // Final game over
-        this.audioManager.playGameOver();
-        
-        if (this.hero) {
-            this.hero.explode();
-        }
-        
-        const finalScore = Math.floor(this.score);
-        this.updateHighScore(finalScore);
-        
-        // Create game over display
-        const gameOverDiv = document.createElement('div');
-        gameOverDiv.className = 'game-over';
-        gameOverDiv.style.position = 'absolute';
-        gameOverDiv.style.top = '50%';
-        gameOverDiv.style.left = '50%';
-        gameOverDiv.style.transform = 'translate(-50%, -50%)';
-        gameOverDiv.style.color = '#ffffff';
-        gameOverDiv.style.fontSize = '36px';
-        gameOverDiv.style.fontFamily = 'Arial, sans-serif';
-        gameOverDiv.style.textAlign = 'center';
-        gameOverDiv.style.textShadow = '2px 2px 4px rgba(0,0,0,0.5)';
-        gameOverDiv.style.zIndex = '1000';
-        gameOverDiv.innerHTML = `
-            <div style="font-size: 48px; margin-bottom: 20px;">Game Over!</div>
-            <div style="margin-bottom: 10px">Final Score: ${finalScore}</div>
-            <div style="margin-bottom: 20px">Coins Collected: ${this.gameState.coins}</div>
-            <div style="font-size: 24px; margin-top: 20px">Press ↑ to Restart</div>
-        `;
-        document.body.appendChild(gameOverDiv);
-        this.gameOverDisplay = gameOverDiv;
-    }
-
-    checkCollisions() {
-        const heroPos = this.hero.getWorldPosition();
-        
-        for (const obstacle of this.worldManager.treesInPath) {
-            const obstaclePos = new THREE.Vector3();
-            obstaclePos.setFromMatrixPosition(obstacle.matrixWorld);
-            
-            // Don't process obstacles that are behind the player (optimization)
-            if (obstaclePos.z > 6) continue;
-            
-            // Different collision detection based on obstacle type
-            if (obstacle.userData.obstacleType === 'rock') {
-                // For rock obstacles, only check collision if not jumping high enough
-                const horizontalDistance = new THREE.Vector2(
-                    heroPos.x - obstaclePos.x,
-                    heroPos.z - obstaclePos.z
-                ).length();
-                
-                // Rock collision test - close horizontally but not jumping high enough
-                // Increase threshold to match the rock's actual width (half of 2.4 = 1.2)
-                // Also check if hero is within the rock's width (after accounting for lane position)
-                const rockWidth = 1.2; // Half of the actual rock width
-                const inRockWidth = Math.abs(heroPos.x - obstaclePos.x) < rockWidth;
-                
-                if (horizontalDistance < 1.0 && inRockWidth && heroPos.y < this.hero.baseY + 0.4) {
-                    console.log('Rock collision detected!');
-                    this.gameState.gameOver();
-                    break;
-                }
-            } else {
-                // For vertical obstacles (trees), check normal collision
-                const distance = obstaclePos.distanceTo(heroPos);
-                if (distance <= 0.6) {
-                    console.log('Tree collision detected!');
-                    this.gameState.gameOver();
-                    break;
-                }
-            }
-        }
+        // Update existing collectibles
+        this.collectibleManager.update(deltaTime);
     }
 
     updateTrees(elapsedTime) {
-        // Remove trees that are out of view
-        for (const tree of [...this.worldManager.treesInPath]) {
-            const treePos = new THREE.Vector3();
-            treePos.setFromMatrixPosition(tree.matrixWorld);
-            if (treePos.z > 7 && tree.visible) {
-                this.worldManager.removeTree(tree);
-            }
-        }
-
-        // Add new trees based on difficulty
-        if (elapsedTime > this.nextTreeSpawn) {
-            // Calculate number of trees to spawn based on difficulty
-            const spawnChance = Math.min(0.8, 0.3 + (this.difficultyFactor - 1) * 0.2);
-            const numTrees = Math.random() < spawnChance ? 2 : 1;
-            
-            // Get available lanes
-            const lanes = [-1, 0, 1];
-            
-            // Spawn trees with pattern variations
-            if (numTrees === 2 && Math.random() < 0.3) {
-                // Special pattern: adjacent trees (harder to dodge)
-                const startLane = Math.random() < 0.5 ? -1 : 0;
-                this.worldManager.addTree(true, startLane);
-                this.worldManager.addTree(true, startLane + 1);
-            } else {
-                // Random pattern
-                for (let i = 0; i < numTrees; i++) {
-                    if (lanes.length === 0) break;
-                    const laneIndex = Math.floor(Math.random() * lanes.length);
-                    const lane = lanes[laneIndex];
-                    lanes.splice(laneIndex, 1);
-                    this.worldManager.addTree(true, lane);
-                }
-            }
-            
-            // Set next spawn time with difficulty adjustment
-            const adjustedInterval = Math.max(
-                this.minSpawnInterval,
-                this.treeReleaseInterval / this.difficultyFactor
-            );
-            this.nextTreeSpawn = elapsedTime + adjustedInterval;
-        }
-    }
-
-    updateGameProgress(elapsedTime) {
-        // Increase difficulty over time (max 3.0 after 120 seconds)
-        this.difficultyFactor = Math.min(3.0, 1.0 + elapsedTime / 40.0);
-        
-        // Update score with difficulty bonus
-        if (elapsedTime > this.nextTreeSpawn) {
-            const baseScore = Math.floor(this.treeReleaseInterval * 10);
-            const difficultyBonus = Math.floor(this.difficultyFactor * 10);
-            this.gameState.addScore(baseScore + difficultyBonus);
-            
-            // Calculate next spawn time with difficulty
-            const adjustedInterval = Math.max(
-                this.minSpawnInterval,
-                this.treeReleaseInterval / this.difficultyFactor
-            );
-            this.nextTreeSpawn = elapsedTime + adjustedInterval;
+        // Spawn new trees
+        if (elapsedTime >= this.nextTreeSpawn) {
+            this.worldManager.spawnTree();
+            this.nextTreeSpawn = elapsedTime + this.gameProgressManager.getTreeSpawnInterval();
         }
     }
 
     addBackgroundTrees() {
-        const numTrees = 36;
-        const gap = 6.28 / 36;
-        for (let i = 0; i < numTrees; i++) {
-            this.worldManager.addTree(false, i * gap, true);
-            this.worldManager.addTree(false, i * gap, false);
-        }
+        this.worldManager.addBackgroundTrees();
     }
 
     handleResize() {
         const width = window.innerWidth;
         const height = window.innerHeight;
-        this.sceneManager.handleResize(width, height);
+        this.camera.aspect = width / height;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(width, height);
     }
 
-    // Input handlers
     moveLeft() {
-        if (this.gameState.state === GameStates.PLAYING) {
-            if (this.currentLane === this.middleLane) {
-                this.currentLane = this.leftLane;
-            } else if (this.currentLane === this.rightLane) {
-                this.currentLane = this.middleLane;
-            }
+        if (this.currentLane > this.leftLane) {
+            this.currentLane--;
+            this.hero.moveToLane(this.currentLane);
         }
     }
 
     moveRight() {
-        if (this.gameState.state === GameStates.PLAYING) {
-            if (this.currentLane === this.middleLane) {
-                this.currentLane = this.rightLane;
-            } else if (this.currentLane === this.leftLane) {
-                this.currentLane = this.middleLane;
-            }
+        if (this.currentLane < this.rightLane) {
+            this.currentLane++;
+            this.hero.moveToLane(this.currentLane);
         }
     }
 
     jump() {
-        if (this.gameState.state === GameStates.PLAYING) {
-            // Debug the jump function
-            console.log('GameEngine: Jump command received');
-            
-            if (!this.hero.jumping) {
-                this.audioManager.playJump(false);
-            } else if (!this.hero.doubleJumping) {
-                this.audioManager.playJump(true);
-            }
-            
-            this.hero.jump();
-        } else if (this.gameState.state === GameStates.GAME_OVER) {
-            // If at game over screen, pressing jump restarts the game
-            this.gameState.startGame();
+        this.hero.jump();
+    }
+
+    resetGame() {
+        // Reset game state
+        this.gameState.reset();
+        
+        // Reset managers
+        this.powerUpManager.reset();
+        this.scoreManager.reset();
+        this.gameProgressManager.reset();
+        
+        // Reset hero
+        this.hero.reset();
+        this.currentLane = this.middleLane;
+        this.hero.setLane(this.currentLane);
+        
+        // Reset world and collectibles
+        this.worldManager.reset();
+        this.collectibleManager.reset();
+        
+        // Reset timing variables
+        this.clock.start();
+        this.nextTreeSpawn = 0;
+        this.nextCollectibleSpawn = 0;
+    }
+
+    onGameStateChanged(gameState) {
+        if (gameState.currentState === GameStates.GAME_OVER) {
+            this.showGameOver();
         }
+    }
+
+    showGameOver() {
+        // Create game over container
+        const gameOverContainer = document.createElement('div');
+        gameOverContainer.className = 'game-ui game-over-container';
+        gameOverContainer.style.position = 'absolute';
+        gameOverContainer.style.top = '50%';
+        gameOverContainer.style.left = '50%';
+        gameOverContainer.style.transform = 'translate(-50%, -50%)';
+        gameOverContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+        gameOverContainer.style.padding = '20px';
+        gameOverContainer.style.borderRadius = '10px';
+        gameOverContainer.style.textAlign = 'center';
+        gameOverContainer.style.color = 'white';
+        gameOverContainer.style.fontFamily = 'Arial, sans-serif';
+        
+        // Add game over text
+        const gameOverText = document.createElement('h1');
+        gameOverText.textContent = 'Game Over';
+        gameOverText.style.margin = '0 0 20px 0';
+        gameOverText.style.fontSize = '36px';
+        gameOverText.style.color = '#FF4444';
+        gameOverContainer.appendChild(gameOverText);
+        
+        // Add final score
+        const finalScore = document.createElement('div');
+        finalScore.textContent = `Final Score: ${this.scoreManager.getScore()}`;
+        finalScore.style.fontSize = '24px';
+        finalScore.style.marginBottom = '20px';
+        gameOverContainer.appendChild(finalScore);
+        
+        // Add high score
+        const highScore = document.createElement('div');
+        highScore.textContent = `High Score: ${this.scoreManager.getHighScore()}`;
+        highScore.style.fontSize = '20px';
+        highScore.style.color = '#FFD700';
+        highScore.style.marginBottom = '30px';
+        gameOverContainer.appendChild(highScore);
+        
+        // Add restart button
+        const restartButton = document.createElement('button');
+        restartButton.textContent = 'Play Again';
+        restartButton.style.padding = '10px 20px';
+        restartButton.style.fontSize = '18px';
+        restartButton.style.backgroundColor = '#4CAF50';
+        restartButton.style.color = 'white';
+        restartButton.style.border = 'none';
+        restartButton.style.borderRadius = '5px';
+        restartButton.style.cursor = 'pointer';
+        restartButton.style.transition = 'background-color 0.3s';
+        
+        restartButton.onmouseover = () => {
+            restartButton.style.backgroundColor = '#45a049';
+        };
+        
+        restartButton.onmouseout = () => {
+            restartButton.style.backgroundColor = '#4CAF50';
+        };
+        
+        restartButton.onclick = () => {
+            document.body.removeChild(gameOverContainer);
+            this.resetGame();
+            this.gameState.startGame();
+        };
+        
+        gameOverContainer.appendChild(restartButton);
+        document.body.appendChild(gameOverContainer);
     }
 }
